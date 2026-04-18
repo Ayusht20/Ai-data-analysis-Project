@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>📊 AI Data Analyst Dashboard</h1>
+
+    <div class="grid">
+
+        <!-- Upload -->
+        <div class="card">
+            <h3>Upload CSV</h3>
+            <input type="file" id="file">
+            <button onclick="uploadFile()">Upload</button>
+        </div>
+
+        <!-- Query -->
+        <div class="card">
+            <h3>Ask Question</h3>
+            <input type="text" id="query" placeholder="e.g. Total sales by category">
+            <button onclick="askQuery()">Ask</button>
+        </div>
+
+        <!-- Result -->
+        <div class="card full">
+            <h3>Result</h3>
+            <div id="result"></div>
+        </div>
+
+        <!-- Charts -->
+        <div class="card full">
+            <h3>Visualization</h3>
+            <div id="chartContainer"></div>
+        </div>
+
+    </div>
+
+</div>
+
+<script src="/static/script.js"></script>
+
+</body>
+</html>
