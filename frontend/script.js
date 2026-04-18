@@ -3,7 +3,7 @@ async function uploadFile() {
     let formData = new FormData();
     formData.append("file", fileInput.files[0]);
 
-    let res = await fetch("http://127.0.0.1:8000/upload", {
+    let res = await fetch("https://ai-data-analysis-project.onrender.com//upload", {
         method: "POST",
         body: formData
     });
@@ -16,7 +16,7 @@ async function askQuery() {
 
     let resultDiv = document.getElementById("result");
     resultDiv.innerHTML = "⏳ Processing...";
-    let res = await fetch(`http://127.0.0.1:8000/ai-query?q=${query}`);
+    let res = await fetch(`https://ai-data-analysis-project.onrender.com//ai-query?q=${query}`);
     let data = await res.json();
 
     displayResult(data.result);
@@ -28,7 +28,7 @@ async function askQuery() {
 
         data.charts.forEach(chart => {
             container.innerHTML += `
-                <img src="http://127.0.0.1:8000/chart-image/${chart}?t=${Date.now()}" 
+                <img src="https://ai-data-analysis-project.onrender.com//chart-image/${chart}?t=${Date.now()}" 
                      style="width:100%; margin-top:10px;">
             `;
         });
@@ -105,7 +105,7 @@ function displayResult(data) {
 }
 
 async function getChart() {
-    await fetch("http://127.0.0.1:8000/chart");
+    await fetch("https://ai-data-analysis-project.onrender.com//chart");
     alert("Chart saved in backend folder");
 }
 
