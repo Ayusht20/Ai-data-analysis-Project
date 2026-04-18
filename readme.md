@@ -58,11 +58,3 @@ An AI-powered web application that allows users to upload CSV files, ask questio
 5. Charts are generated automatically  
 
 ---
-
-## ▶️ Run Locally
-
-```bash
-git clone https://github.com/YOUR_USERNAME/Ai-data-analysis-Project.git
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload
