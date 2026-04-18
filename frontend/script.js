@@ -1,25 +1,43 @@
 async function uploadFile() {
     let fileInput = document.getElementById("file");
+
     let formData = new FormData();
     formData.append("file", fileInput.files[0]);
 
-    let res = await fetch("https://ai-data-analysis-project.onrender.com//upload", {
+    let res = await fetch("https://ai-data-analysis-project.onrender.com/upload", {
         method: "POST",
         body: formData
     });
 
     let data = await res.json();
-    alert(data.message);
+
+    alert(data.message || "File uploaded successfully");
 }
 async function askQuery() {
     let query = document.getElementById("query").value;
 
     let resultDiv = document.getElementById("result");
     resultDiv.innerHTML = "⏳ Processing...";
-    let res = await fetch(`https://ai-data-analysis-project.onrender.com//ai-query?q=${query}`);
+
+    let res = await fetch(`https://ai-data-analysis-project.onrender.com/ai-query?q=${encodeURIComponent(query)}`);
     let data = await res.json();
 
-    displayResult(data.result);
+    console.log(data); // 🔍 debug
+
+    // ✅ handle backend error
+    if (data.error) {
+        alert(data.error);
+        resultDiv.innerHTML = `<p style="color:red;">${data.error}</p>`;
+        return;
+    }
+
+    // ✅ safe result handling
+    if (data.result === undefined || data.result === null) {
+        resultDiv.innerHTML = "<p>No result found</p>";
+    } else {
+        displayResult(data.result);
+    }
+
     let container = document.getElementById("chartContainer");
 
     if (data.charts && data.charts.length > 0) {
@@ -28,7 +46,7 @@ async function askQuery() {
 
         data.charts.forEach(chart => {
             container.innerHTML += `
-                <img src="https://ai-data-analysis-project.onrender.com//chart-image/${chart}?t=${Date.now()}" 
+                <img src="https://ai-data-analysis-project.onrender.com/chart-image/${chart}?t=${Date.now()}" 
                      style="width:100%; margin-top:10px;">
             `;
         });
