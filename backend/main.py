@@ -20,18 +20,18 @@ app = FastAPI()
 # ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://ai-data-analysis-project.vercel.app/"],
+    allow_origins=["https://ai-data-analysis-project.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ---------------- FRONTEND ----------------
-app.mount("/static", StaticFiles(directory="../frontend"), name="static")
+# app.mount("/static", StaticFiles(directory="../frontend"), name="static")
 
-@app.get("/")
-def serve_frontend():
-    return FileResponse("../frontend/index.html")
+# @app.get("/")
+# def serve_frontend():
+#     return FileResponse("../frontend/index.html")
 
 
 # Global dataframe
