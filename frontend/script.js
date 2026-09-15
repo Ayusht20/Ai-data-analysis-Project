@@ -126,4 +126,3 @@ async function getChart() {
     await fetch("https://ai-data-analysis-project.onrender.com//chart");
     alert("Chart saved in backend folder");
 }
-
