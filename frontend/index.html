@@ -1,45 +1,70 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>AI Dashboard</title>
-    <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Data Analyst</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
 <div class="container">
 
-    <h1>📊 AI Data Analyst Dashboard</h1>
+  <header>
+    <div class="eyebrow"><span class="status-dot"></span>Data analysis workspace</div>
+    <h1>AI Data Analyst</h1>
+    <p>Upload a dataset, ask a question in plain language, and get a result or chart back.</p>
+  </header>
 
-    <div class="grid">
+  <div class="grid">
 
-        <!-- Upload -->
-        <div class="card">
-            <h3>Upload CSV</h3>
-            <input type="file" id="file">
-            <button onclick="uploadFile()">Upload</button>
-        </div>
-
-        <!-- Query -->
-        <div class="card">
-            <h3>Ask Question</h3>
-            <input type="text" id="query" placeholder="e.g. Total sales by category">
-            <button onclick="askQuery()">Ask</button>
-        </div>
-
-        <!-- Result -->
-        <div class="card full">
-            <h3>Result</h3>
-            <div id="result"></div>
-        </div>
-
-        <!-- Charts -->
-        <div class="card full">
-            <h3>Visualization</h3>
-            <div id="chartContainer"></div>
-        </div>
-
+    <!-- Upload -->
+    <div class="panel">
+      <div class="panel-head">
+        <span class="dot"></span>
+        <h3>Upload data</h3>
+      </div>
+      <label class="field-label" for="file">CSV file</label>
+      <input type="file" id="file">
+      <button onclick="uploadFile()">Upload</button>
     </div>
+
+    <!-- Query -->
+    <div class="panel">
+      <div class="panel-head">
+        <span class="dot"></span>
+        <h3>Ask a question</h3>
+      </div>
+      <label class="field-label" for="query">Query</label>
+      <input type="text" id="query" placeholder="e.g. Total sales by category">
+      <button onclick="askQuery()">Ask</button>
+    </div>
+
+    <!-- Result -->
+    <div class="panel full">
+      <div class="panel-head">
+        <span class="dot"></span>
+        <h3>Result</h3>
+      </div>
+      <div id="result"></div>
+    </div>
+
+    <!-- Charts -->
+    <div class="panel full">
+      <div class="panel-head">
+        <span class="dot"></span>
+        <h3>Visualization</h3>
+        <span>generated per query</span>
+      </div>
+      <div id="chartContainer"></div>
+      <button class="secondary" onclick="getChart()">Save chart to backend folder</button>
+    </div>
+
+  </div>
 
 </div>
 
