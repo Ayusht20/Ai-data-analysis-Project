@@ -1,7 +1,26 @@
+const API_BASE = "https://ai-data-analysis-project.onrender.com";
+const PAGE_SIZE = 10;
+
+// Pagination state tracker
+let tableState = {
+    data: [],
+    currentPage: 1,
+    totalPages: 1
+};
+
+function escapeHTML(str) {
+    return String(str ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 async function uploadFile() {
-    let fileInput = document.getElementById("file");
-    let file = fileInput.files[0];
-    let uploadBtn = document.getElementById("uploadBtn");
+    const fileInput = document.getElementById("file");
+    const file = fileInput?.files[0];
+    const uploadBtn = document.getElementById("uploadBtn");
 
     if (!file) {
         alert("Please choose a CSV file first.");
@@ -13,29 +32,42 @@ async function uploadFile() {
         return;
     }
 
-    let formData = new FormData();
+    const formData = new FormData();
     formData.append("file", file);
 
     uploadBtn.disabled = true;
 
     try {
-        let res = await fetch("https://ai-data-analysis-project.onrender.com/upload", {
+        const res = await fetch(`${API_BASE}/upload`, {
             method: "POST",
             body: formData
         });
 
-        let data = await res.json();
+        const data = await res.json();
+
+        if (!res.ok) {
+            throw new Error(data.error || `Upload failed with status ${res.status}`);
+        }
 
         alert(data.message || "File uploaded successfully");
+    } catch (err) {
+        alert(err.message || "Network error while uploading file.");
     } finally {
         uploadBtn.disabled = false;
     }
 }
-async function askQuery() {
-    let query = document.getElementById("query").value;
 
-    let resultDiv = document.getElementById("result");
-    let askBtn = document.getElementById("askBtn");
+async function askQuery() {
+    const queryInput = document.getElementById("query");
+    const query = queryInput.value.trim();
+    const resultDiv = document.getElementById("result");
+    const askBtn = document.getElementById("askBtn");
+    const container = document.getElementById("chartContainer");
+
+    if (!query) {
+        alert("Please enter a query before analyzing.");
+        return;
+    }
 
     resultDiv.innerHTML = `
         <div class="loader">
@@ -46,19 +78,15 @@ async function askQuery() {
     askBtn.disabled = true;
 
     try {
-        let res = await fetch(`https://ai-data-analysis-project.onrender.com/ai-query?q=${encodeURIComponent(query)}`);
-        let data = await res.json();
+        const res = await fetch(`${API_BASE}/ai-query?q=${encodeURIComponent(query)}`);
+        const data = await res.json();
 
-        console.log(data); // 🔍 debug
-
-        // ✅ handle backend error
-        if (data.error) {
-            alert(data.error);
-            resultDiv.innerHTML = `<p style="color:red;">${data.error}</p>`;
+        if (!res.ok || data.error) {
+            const errorMsg = data.error || `Request failed with status ${res.status}`;
+            resultDiv.innerHTML = `<p style="color:var(--danger);">${escapeHTML(errorMsg)}</p>`;
             return;
         }
 
-        // ✅ safe result handling
         if (data.result === undefined || data.result === null) {
             resultDiv.innerHTML = "<p>No result found</p>";
         } else {
@@ -66,107 +94,149 @@ async function askQuery() {
         }
 
         resultDiv.classList.remove("fade-in");
-        void resultDiv.offsetWidth; // restart the animation
+        void resultDiv.offsetWidth;
         resultDiv.classList.add("fade-in");
-
-        let container = document.getElementById("chartContainer");
 
         if (data.charts && data.charts.length > 0) {
             container.style.display = "block";
-            container.innerHTML = "<h4>Visualization</h4>";
+            let chartHtml = "<h4>Visualization</h4>";
 
             data.charts.forEach(chart => {
-                container.innerHTML += `
-                    <img src="https://ai-data-analysis-project.onrender.com/chart-image/${chart}?t=${Date.now()}" 
-                         style="width:100%; margin-top:10px;">
+                chartHtml += `
+                    <img src="${API_BASE}/chart-image/${encodeURIComponent(chart)}?t=${Date.now()}" 
+                         alt="Generated Chart"
+                         loading="lazy">
                 `;
             });
 
+            container.innerHTML = chartHtml;
             container.classList.remove("fade-in");
             void container.offsetWidth;
             container.classList.add("fade-in");
-        } else {
+        } else if (container) {
             container.style.display = "none";
         }
+    } catch (err) {
+        resultDiv.innerHTML = `<p style="color:var(--danger);">${escapeHTML(err.message || "Failed to fetch response.")}</p>`;
     } finally {
         askBtn.disabled = false;
     }
 }
+
 function displayResult(data) {
-    let container = document.getElementById("result");
+    const container = document.getElementById("result");
 
-    // 🔥 Case 1: Single value (number/string)
+    if (data === null || data === undefined) {
+        container.innerHTML = "<p>No result found</p>";
+        return;
+    }
+
+    // Single scalar value
     if (typeof data !== "object") {
-        container.innerHTML = `<p><b>Result:</b> ${data}</p>`;
+        container.innerHTML = `<p><b>Result:</b> ${escapeHTML(data)}</p>`;
         return;
     }
 
-    // 🔥 Case 2: List of strings (like column names)
-    if (Array.isArray(data) && typeof data[0] === "string") {
-        let list = "<ul>";
-        data.forEach(item => list += `<li>${item}</li>`);
-        list += "</ul>";
-        container.innerHTML = list;
-        return;
-    }
-
-    // 🔥 Case 3: Empty result
+    // Empty collection
     if (Array.isArray(data) && data.length === 0) {
         container.innerHTML = "<p>No data found</p>";
         return;
     }
 
-    // 🔥 Case 4: Table (array of objects)
+    // Array of records (Table) or list of strings
     if (Array.isArray(data)) {
-        let table = "<table><tr>";
-
-        Object.keys(data[0]).forEach(key => {
-            table += `<th>${key}</th>`;
-        });
-
-        table += "</tr>";
-
-        data.forEach(row => {
-            table += "<tr>";
-            Object.values(row).forEach(val => {
-                table += `<td>${val}</td>`;
-            });
-            table += "</tr>";
-        });
-
-        table += "</table>";
-
-        container.innerHTML = table;
+        tableState.data = data;
+        tableState.currentPage = 1;
+        tableState.totalPages = Math.ceil(data.length / PAGE_SIZE);
+        renderPaginatedView();
         return;
     }
 
-    // 🔥 Case 5: Object (like dict)
-    if (typeof data === "object") {
-        let table = "<table><tr>";
+    // Single Key-Value dictionary
+    const keys = Object.keys(data);
+    let table = `<div class="table-wrapper"><table><thead><tr>`;
+    keys.forEach(k => { table += `<th>${escapeHTML(k)}</th>`; });
+    table += `</tr></thead><tbody><tr>`;
+    keys.forEach(k => { table += `<td>${escapeHTML(data[k])}</td>`; });
+    table += `</tr></tbody></table></div>`;
 
-        Object.keys(data).forEach(key => {
-            table += `<th>${key}</th>`;
+    container.innerHTML = table;
+}
+
+function renderPaginatedView() {
+    const container = document.getElementById("result");
+    const { data, currentPage, totalPages } = tableState;
+
+    const startIdx = (currentPage - 1) * PAGE_SIZE;
+    const currentSlice = data.slice(startIdx, startIdx + PAGE_SIZE);
+
+    let contentHtml = "";
+
+    // Case A: Array of primitives (e.g. column names or simple lists)
+    if (typeof data[0] !== "object") {
+        contentHtml += "<ul>";
+        currentSlice.forEach(item => {
+            contentHtml += `<li>${escapeHTML(item)}</li>`;
         });
+        contentHtml += "</ul>";
+    } else {
+        // Case B: Tabular dataset (array of objects)
+        const headers = Object.keys(data[0]);
 
-        table += "</tr><tr>";
-
-        Object.values(data).forEach(val => {
-            table += `<td>${val}</td>`;
+        contentHtml += `<div class="table-wrapper"><table><thead><tr>`;
+        headers.forEach(h => {
+            contentHtml += `<th>${escapeHTML(h)}</th>`;
         });
+        contentHtml += `</tr></thead><tbody>`;
 
-        table += "</tr></table>";
+        currentSlice.forEach(row => {
+            contentHtml += "<tr>";
+            headers.forEach(h => {
+                contentHtml += `<td>${escapeHTML(row[h])}</td>`;
+            });
+            contentHtml += "</tr>";
+        });
+        contentHtml += `</tbody></table></div>`;
+    }
 
-        container.innerHTML = table;
+    // Case C: Add pagination footer if there is more than 1 page
+    if (totalPages > 1) {
+        const startRecord = startIdx + 1;
+        const endRecord = Math.min(startIdx + PAGE_SIZE, data.length);
+
+        contentHtml += `
+            <div class="pagination-bar">
+                <span>Showing <b>${startRecord}–${endRecord}</b> of <b>${data.length}</b> records</span>
+                <div class="pagination-controls">
+                    <button class="page-btn" onclick="changePage(-1)" ${currentPage === 1 ? "disabled" : ""}>Previous</button>
+                    <span class="page-indicator">${currentPage} / ${totalPages}</span>
+                    <button class="page-btn" onclick="changePage(1)" ${currentPage === totalPages ? "disabled" : ""}>Next</button>
+                </div>
+            </div>
+        `;
+    }
+
+    container.innerHTML = contentHtml;
+}
+
+function changePage(direction) {
+    const next = tableState.currentPage + direction;
+    if (next >= 1 && next <= tableState.totalPages) {
+        tableState.currentPage = next;
+        renderPaginatedView();
     }
 }
 
 async function getChart() {
-    let chartBtn = document.getElementById("chartBtn");
+    const chartBtn = document.getElementById("chartBtn");
     chartBtn.disabled = true;
 
     try {
-        await fetch("https://ai-data-analysis-project.onrender.com//chart");
+        const res = await fetch(`${API_BASE}/chart`);
+        if (!res.ok) throw new Error("Chart generation failed");
         alert("Chart saved in backend folder");
+    } catch (err) {
+        alert(err.message || "Failed to generate chart.");
     } finally {
         chartBtn.disabled = false;
     }
