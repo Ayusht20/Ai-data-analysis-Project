@@ -127,22 +127,39 @@ def ai_query(q: str):
     if df is None:
         return {"error": "Upload file first"}
 
-    code = get_ai_code(q, list(df.columns))
-    code = code.replace("```python", "").replace("```", "").strip()
+    try:
+        code = get_ai_code(q, list(df.columns))
+        code = code.replace("```python", "").replace("```", "").strip()
 
-    result = execute_code(df, code)
+        result = execute_code(df, code)
 
-    raw_result = result
-    chart_files = generate_chart_from_result(raw_result)
+        # 1. Skip chart generation if it's a massive raw dataframe dump
+        chart_files = []
+        if isinstance(result, pd.DataFrame) and len(result) > 50:
+            chart_files = []  # Do not choke Matplotlib with full table dumps
+        else:
+            try:
+                chart_files = generate_chart_from_result(result)
+            except Exception:
+                chart_files = []
 
-    result = convert_result(result)
+        # 2. Prevent OOM by capping maximum returned rows
+        if isinstance(result, pd.DataFrame):
+            if len(result) > 500:
+                result = result.head(500)  # Cap preview to 500 rows
+            # 3. Clean NaNs so JSON serialization never throws 500
+            result = result.replace({np.nan: None})
 
-    return {
-        "result": result,
-        "charts": chart_files
-    }
+        result = convert_result(result)
 
-
+        return {
+            "result": result,
+            "charts": chart_files or []
+        }
+    except Exception as e:
+        # Return a 200 with error JSON so CORS headers remain intact
+        return {"error": f"Execution failed: {str(e)}"}
+    
 @app.get("/chart-image/{name}")
 def chart_image(name: str):
     path = os.path.join(os.getcwd(), name)
