@@ -1,16 +1,27 @@
 async function uploadFile() {
     let fileInput = document.getElementById("file");
-
+    let file = fileInput.files[0];
+ 
+    if (!file) {
+        alert("Please choose a CSV file first.");
+        return;
+    }
+ 
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+        alert("Only CSV files are supported.");
+        return;
+    }
+ 
     let formData = new FormData();
-    formData.append("file", fileInput.files[0]);
-
+    formData.append("file", file);
+ 
     let res = await fetch("https://ai-data-analysis-project.onrender.com/upload", {
         method: "POST",
         body: formData
     });
-
+ 
     let data = await res.json();
-
+ 
     alert(data.message || "File uploaded successfully");
 }
 async function askQuery() {
