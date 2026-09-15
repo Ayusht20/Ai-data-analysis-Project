@@ -1,68 +1,95 @@
 async function uploadFile() {
     let fileInput = document.getElementById("file");
     let file = fileInput.files[0];
- 
+    let uploadBtn = document.getElementById("uploadBtn");
+
     if (!file) {
         alert("Please choose a CSV file first.");
         return;
     }
- 
+
     if (!file.name.toLowerCase().endsWith(".csv")) {
         alert("Only CSV files are supported.");
         return;
     }
- 
+
     let formData = new FormData();
     formData.append("file", file);
- 
-    let res = await fetch("https://ai-data-analysis-project.onrender.com/upload", {
-        method: "POST",
-        body: formData
-    });
- 
-    let data = await res.json();
- 
-    alert(data.message || "File uploaded successfully");
+
+    uploadBtn.disabled = true;
+
+    try {
+        let res = await fetch("https://ai-data-analysis-project.onrender.com/upload", {
+            method: "POST",
+            body: formData
+        });
+
+        let data = await res.json();
+
+        alert(data.message || "File uploaded successfully");
+    } finally {
+        uploadBtn.disabled = false;
+    }
 }
 async function askQuery() {
     let query = document.getElementById("query").value;
 
     let resultDiv = document.getElementById("result");
-    resultDiv.innerHTML = "⏳ Processing...";
+    let askBtn = document.getElementById("askBtn");
 
-    let res = await fetch(`https://ai-data-analysis-project.onrender.com/ai-query?q=${encodeURIComponent(query)}`);
-    let data = await res.json();
+    resultDiv.innerHTML = `
+        <div class="loader">
+            <div class="dots"><span></span><span></span><span></span></div>
+            <span>Analyzing your data…</span>
+        </div>
+    `;
+    askBtn.disabled = true;
 
-    console.log(data); // 🔍 debug
+    try {
+        let res = await fetch(`https://ai-data-analysis-project.onrender.com/ai-query?q=${encodeURIComponent(query)}`);
+        let data = await res.json();
 
-    // ✅ handle backend error
-    if (data.error) {
-        alert(data.error);
-        resultDiv.innerHTML = `<p style="color:red;">${data.error}</p>`;
-        return;
-    }
+        console.log(data); // 🔍 debug
 
-    // ✅ safe result handling
-    if (data.result === undefined || data.result === null) {
-        resultDiv.innerHTML = "<p>No result found</p>";
-    } else {
-        displayResult(data.result);
-    }
+        // ✅ handle backend error
+        if (data.error) {
+            alert(data.error);
+            resultDiv.innerHTML = `<p style="color:red;">${data.error}</p>`;
+            return;
+        }
 
-    let container = document.getElementById("chartContainer");
+        // ✅ safe result handling
+        if (data.result === undefined || data.result === null) {
+            resultDiv.innerHTML = "<p>No result found</p>";
+        } else {
+            displayResult(data.result);
+        }
 
-    if (data.charts && data.charts.length > 0) {
-        container.style.display = "block";
-        container.innerHTML = "<h4>Visualization</h4>";
+        resultDiv.classList.remove("fade-in");
+        void resultDiv.offsetWidth; // restart the animation
+        resultDiv.classList.add("fade-in");
 
-        data.charts.forEach(chart => {
-            container.innerHTML += `
-                <img src="https://ai-data-analysis-project.onrender.com/chart-image/${chart}?t=${Date.now()}" 
-                     style="width:100%; margin-top:10px;">
-            `;
-        });
-    } else {
-        container.style.display = "none";
+        let container = document.getElementById("chartContainer");
+
+        if (data.charts && data.charts.length > 0) {
+            container.style.display = "block";
+            container.innerHTML = "<h4>Visualization</h4>";
+
+            data.charts.forEach(chart => {
+                container.innerHTML += `
+                    <img src="https://ai-data-analysis-project.onrender.com/chart-image/${chart}?t=${Date.now()}" 
+                         style="width:100%; margin-top:10px;">
+                `;
+            });
+
+            container.classList.remove("fade-in");
+            void container.offsetWidth;
+            container.classList.add("fade-in");
+        } else {
+            container.style.display = "none";
+        }
+    } finally {
+        askBtn.disabled = false;
     }
 }
 function displayResult(data) {
@@ -134,6 +161,13 @@ function displayResult(data) {
 }
 
 async function getChart() {
-    await fetch("https://ai-data-analysis-project.onrender.com//chart");
-    alert("Chart saved in backend folder");
+    let chartBtn = document.getElementById("chartBtn");
+    chartBtn.disabled = true;
+
+    try {
+        await fetch("https://ai-data-analysis-project.onrender.com//chart");
+        alert("Chart saved in backend folder");
+    } finally {
+        chartBtn.disabled = false;
+    }
 }
