@@ -58,31 +58,55 @@ def execute_code(data_df, code):
             if word in code:
                 return "Unsafe code execution blocked"
 
-        # Safe execution namespace
-        local_scope = {
+        # Whitelist safe built-in functions
+        safe_builtins = {
+            "int": int,
+            "float": float,
+            "str": str,
+            "bool": bool,
+            "list": list,
+            "dict": dict,
+            "set": set,
+            "tuple": tuple,
+            "len": len,
+            "min": min,
+            "max": max,
+            "sum": sum,
+            "range": range,
+            "round": round,
+            "sorted": sorted,
+            "abs": abs,
+            "enumerate": enumerate,
+            "zip": zip,
+            "print": print,
+        }
+
+        # Execution scope
+        scope = {
+            "__builtins__": safe_builtins,
             "df": data_df,
             "pd": pd,
             "np": np
         }
 
-        # If it's a single one-liner expression without assignments, eval directly
+        # If single-expression without assignment, evaluate directly
         if "\n" not in code and "=" not in code:
-            return eval(code, {"__builtins__": {}}, local_scope)
+            return eval(code, scope)
 
-        # If it's multi-line or contains assignments, execute with exec
-        # Ensure code assigns to `result` if not already assigned
+        # Multi-line logic execution
         if "result" not in code:
-            lines = code.strip().split("\n")
-            lines[-1] = f"result = {lines[-1]}"
-            code = "\n".join(lines)
+            lines = [line for line in code.strip().split("\n") if line.strip()]
+            if lines:
+                lines[-1] = f"result = {lines[-1]}"
+                code = "\n".join(lines)
 
-        exec(code, {"__builtins__": {}}, local_scope)
-        return local_scope.get("result", "Query executed successfully with no output.")
+        exec(code, scope)
+        return scope.get("result", "Query executed successfully with no output.")
 
     except Exception as e:
         return f"Error: {str(e)}"
-    
-# ---------------- RESULT SANITIZATION ----------------
+
+    # ---------------- RESULT SANITIZATION ----------------
 def convert_result(result):
     if result is None:
         return None
