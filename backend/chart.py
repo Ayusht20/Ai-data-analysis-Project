@@ -7,6 +7,7 @@ import numpy as np
 
 CHART_DIR = os.getcwd()
 
+
 def save_and_close(fig, filename):
     filepath = os.path.join(CHART_DIR, filename)
     fig.tight_layout()
@@ -14,9 +15,25 @@ def save_and_close(fig, filename):
     plt.close(fig)
     return filename
 
+
+def _generate_fallback_chart(message="Visualisation not applicable"):
+    fig, ax = plt.subplots(figsize=(7, 2.5))
+    ax.text(
+        0.5, 0.5, message,
+        horizontalalignment='center',
+        verticalalignment='center',
+        fontsize=11,
+        color='#5b6472',
+        style='italic',
+        wrap=True
+    )
+    ax.axis('off')
+    return [save_and_close(fig, "info_chart.png")]
+
+
 def generate_chart_from_result(result):
     try:
-        # Convert numpy scalars to native python
+        # Convert NumPy scalars to native Python primitives
         if isinstance(result, (np.integer, np.floating)):
             result = result.item()
 
@@ -29,82 +46,103 @@ def generate_chart_from_result(result):
             ax.grid(axis='y', linestyle='--', alpha=0.5)
             return [save_and_close(fig, "chart.png")]
 
-        # ---------------- 2. DICTIONARY OR PANDAS SERIES ----------------
+        # ---------------- 2. ARRAYS, LISTS, INDEXES ----------------
+        if isinstance(result, (list, tuple, pd.Index, np.ndarray)):
+            if len(result) == 0:
+                return _generate_fallback_chart("Empty list returned")
+
+            # Convert to Pandas Series of object dtype to safely bypass StringDtype checks
+            s = pd.Series(list(result)).dropna()
+
+            if s.empty:
+                return _generate_fallback_chart("No non-null items found")
+
+            # Check if values are numeric
+            s_numeric = pd.to_numeric(s, errors='coerce')
+            if s_numeric.notnull().sum() > 0:
+                s = s_numeric.dropna().head(20)
+                fig, ax = plt.subplots(figsize=(8, 4.5))
+                ax.bar(range(len(s)), s.values, color="#faad14")
+                ax.set_title("Numeric Items", fontsize=12, fontweight='bold')
+                ax.grid(axis='y', linestyle='--', alpha=0.4)
+                return [save_and_close(fig, "list_chart.png")]
+            else:
+                # String / Categorical list: compute frequencies
+                counts = s.astype(str).value_counts().head(10)
+                fig, ax = plt.subplots(figsize=(8, 4.5))
+                ax.bar(counts.index.astype(str), counts.values, color="#1890ff")
+                ax.set_title("Item Frequency", fontsize=12, fontweight='bold')
+                ax.set_ylabel("Count")
+                ax.grid(axis='y', linestyle='--', alpha=0.4)
+                plt.xticks(rotation=30, ha='right')
+                return [save_and_close(fig, "list_chart.png")]
+
+        # ---------------- 3. DICTIONARY OR PANDAS SERIES ----------------
         if isinstance(result, (dict, pd.Series)):
             s = pd.Series(result).dropna()
 
             if s.empty:
                 return _generate_fallback_chart("Empty series returned")
 
-            # Try numeric conversion if values are strings of numbers
+            # Numeric conversion check
             s_numeric = pd.to_numeric(s, errors='coerce')
             if s_numeric.notnull().sum() > 0:
                 s = s_numeric.dropna()
+            else:
+                s = s.astype(str).value_counts()
 
-            # If still non-numeric, show frequency distribution of the values
-            if not np.issubdtype(s.dtype, np.number):
-                s = s.value_counts().head(10)
-
-            # Limit to top 15 entries for readability
             s = s.head(15)
-
             charts = []
 
-            # A. Horizontal / Vertical Bar Chart
+            # Bar Chart
             fig, ax = plt.subplots(figsize=(8, 4.5))
-            s.plot(kind="bar", ax=ax, color="#2f54eb")
+            ax.bar(s.index.astype(str), s.values, color="#2f54eb")
             ax.set_title("Distribution / Breakdown", fontsize=12, fontweight='bold')
             ax.set_ylabel("Value")
             ax.grid(axis='y', linestyle='--', alpha=0.4)
             plt.xticks(rotation=30, ha='right')
             charts.append(save_and_close(fig, "bar_chart.png"))
 
-            # B. Pie Chart (Only if values are positive and non-zero)
-            if (s > 0).all() and len(s) <= 8:
+            # Pie Chart (only if valid numeric values and manageable slice count)
+            if pd.api.types.is_numeric_dtype(s) and (s > 0).all() and len(s) <= 8:
                 fig, ax = plt.subplots(figsize=(6, 6))
-                s.plot(kind="pie", ax=ax, autopct="%1.1f%%", startangle=90)
+                ax.pie(s.values, labels=s.index.astype(str), autopct="%1.1f%%", startangle=90)
                 ax.set_title("Proportion", fontsize=12, fontweight='bold')
-                ax.set_ylabel("")
                 charts.append(save_and_close(fig, "pie_chart.png"))
 
             return charts
 
-        # ---------------- 3. DATAFRAME ----------------
+        # ---------------- 4. DATAFRAME ----------------
         if isinstance(result, pd.DataFrame):
             if result.empty:
                 return _generate_fallback_chart("No records matched the query")
 
             charts = []
-            num_cols = result.select_dtypes(include=[np.number]).columns.tolist()
-            cat_cols = result.select_dtypes(exclude=[np.number]).columns.tolist()
+            num_cols = result.select_dtypes(include=['number']).columns.tolist()
+            cat_cols = [col for col in result.columns if col not in num_cols]
 
-            # Case 3A: One category + One or more numeric columns (e.g., GroupBy result)
+            # Case A: 1 Category + 1 Numeric (e.g. GroupBy results)
             if len(cat_cols) >= 1 and len(num_cols) >= 1:
-                cat_col = cat_cols[0]
-                num_col = num_cols[0]
+                cat_col, num_col = cat_cols[0], num_cols[0]
                 plot_data = result.head(12)
-
                 fig, ax = plt.subplots(figsize=(8, 4.5))
                 ax.bar(plot_data[cat_col].astype(str), plot_data[num_col], color="#13c2c2")
                 ax.set_title(f"{num_col} by {cat_col}", fontsize=12, fontweight='bold')
                 ax.set_ylabel(num_col)
-                ax.set_xlabel(cat_col)
                 ax.grid(axis='y', linestyle='--', alpha=0.4)
                 plt.xticks(rotation=30, ha='right')
                 charts.append(save_and_close(fig, "bar_chart.png"))
                 return charts
 
-            # Case 3B: Numeric data only
+            # Case B: Pure numeric DataFrame
             if len(num_cols) >= 1:
                 target_col = num_cols[0]
-
                 fig, ax = plt.subplots(figsize=(8, 4.5))
                 if len(result) <= 15:
-                    result[target_col].plot(kind="bar", ax=ax, color="#722ed1")
+                    ax.bar(range(len(result)), result[target_col], color="#722ed1")
                     ax.set_title(f"{target_col} Values", fontsize=12, fontweight='bold')
-                    plt.xticks(rotation=0)
                 else:
-                    result[target_col].plot(kind="hist", bins=15, ax=ax, color="#fa8c16", edgecolor="white")
+                    ax.hist(result[target_col].dropna(), bins=15, color="#fa8c16", edgecolor="white")
                     ax.set_title(f"{target_col} Distribution", fontsize=12, fontweight='bold')
                     ax.set_xlabel(target_col)
                     ax.set_ylabel("Frequency")
@@ -113,13 +151,12 @@ def generate_chart_from_result(result):
                 charts.append(save_and_close(fig, "num_chart.png"))
                 return charts
 
-            # Case 3C: Categorical data only (Text columns)
+            # Case C: Pure categorical/text DataFrame
             if len(cat_cols) >= 1:
                 col = cat_cols[0]
-                counts = result[col].value_counts().head(10)
-
+                counts = result[col].astype(str).value_counts().head(10)
                 fig, ax = plt.subplots(figsize=(8, 4.5))
-                counts.plot(kind="bar", ax=ax, color="#52c41a")
+                ax.bar(counts.index.astype(str), counts.values, color="#52c41a")
                 ax.set_title(f"Top Values in {col}", fontsize=12, fontweight='bold')
                 ax.set_ylabel("Count")
                 ax.grid(axis='y', linestyle='--', alpha=0.4)
@@ -127,40 +164,8 @@ def generate_chart_from_result(result):
                 charts.append(save_and_close(fig, "cat_chart.png"))
                 return charts
 
-        # ---------------- 4. LIST / ARRAYS ----------------
-        if isinstance(result, (list, tuple)):
-            if len(result) == 0:
-                return _generate_fallback_chart("Empty list returned")
-
-            # Numeric list
-            try:
-                numeric_arr = pd.to_numeric(pd.Series(result), errors='raise')
-                fig, ax = plt.subplots(figsize=(8, 4))
-                numeric_arr.head(20).plot(kind="bar", ax=ax, color="#faad14")
-                ax.set_title("List Item Values", fontsize=12, fontweight='bold')
-                ax.grid(axis='y', linestyle='--', alpha=0.4)
-                return [save_and_close(fig, "list_chart.png")]
-            except Exception:
-                # String list (e.g., column names, unique strings)
-                counts = pd.Series(result).value_counts().head(10)
-                fig, ax = plt.subplots(figsize=(8, 4))
-                counts.plot(kind="bar", ax=ax, color="#1890ff")
-                ax.set_title("Frequency of Items", fontsize=12, fontweight='bold')
-                plt.xticks(rotation=30, ha='right')
-                return [save_and_close(fig, "list_chart.png")]
-
-        # Default fallback
         return _generate_fallback_chart(f"Result type: {type(result).__name__}")
 
     except Exception as e:
-        print("CHART GENERATION FAILED:", e)
-        return _generate_fallback_chart(f"Could not render chart: {str(e)[:40]}")
-
-
-def _generate_fallback_chart(message="Visualisation not applicable"):
-    """Generates an informational visual tile so every query has a chart."""
-    fig, ax = plt.subplots(figsize=(7, 2))
-    ax.text(0.5, 0.5, message, horizontalalignment='center', verticalalignment='center',
-            fontsize=11, color='#5b6472', style='italic')
-    ax.axis('off')
-    return [save_and_close(fig, "info_chart.png")]
+        print("CHART ERROR:", e)
+        return _generate_fallback_chart("Visualisation could not be rendered")

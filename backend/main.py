@@ -1,123 +1,129 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-
-import pandas as pd
+import os
+import re
 import matplotlib
 matplotlib.use('Agg')
 
-import os
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+import pandas as pd
 import numpy as np
-import re
 
 from chart import generate_chart_from_result
-
 from ai import get_ai_code
 
 app = FastAPI()
 
 # ---------------- CORS ----------------
+origins = [
+    "https://ai-data-analysis-project.vercel.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:5500",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://ai-data-analysis-project.vercel.app"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---------------- FRONTEND ----------------
-# app.mount("/static", StaticFiles(directory="../frontend"), name="static")
-
-# @app.get("/")
-# def serve_frontend():
-#     return FileResponse("../frontend/index.html")
-
-
-# Global dataframe
+# Global in-memory dataset
 df = None
 
 
-# ---------------- EXECUTE AI CODE ----------------
-def execute_code(df, code):
+# ---------------- CODE EXECUTION ----------------
+def execute_code(data_df, code):
     try:
-        # remove ```python ```
         code = code.replace("```python", "").replace("```", "").strip()
 
-        # Fix: startswith case-insensitive
+        # Fix startswith case-insensitive patterns
         pattern = r"df\['(.*?)'\]\.str\.startswith\('(.*?)'\)"
         match = re.search(pattern, code)
-
         if match:
             col = match.group(1)
             value = match.group(2).lower()
-
             code = f"df[df['{col}'].str.lower().str.strip().str.startswith('{value}')]"
 
-        # Fix: append deprecated
+        # Fix deprecated append
         if ".append(" in code:
             code = code.replace(".append(", ", ")
             code = f"pd.concat([{code}])"
 
-        # Block unsafe code
-        banned_words = ["import", "__", "os", "sys", "eval", "exec"]
+        # Block malicious commands
+        banned_words = ["import", "__", "os", "sys", "eval", "exec", "open", "subprocess"]
         for word in banned_words:
             if word in code:
-                return "Unsafe code blocked"
+                return "Unsafe code execution blocked"
 
-        # Execute code
-        result = eval(code, {"__builtins__": {}}, {"df": df, "pd": pd})
-
+        # Execute in sandbox context
+        result = eval(code, {"__builtins__": {}}, {"df": data_df, "pd": pd, "np": np})
         return result
 
     except Exception as e:
         return f"Error: {str(e)}"
 
 
-# ---------------- CONVERT RESULT ----------------
+# ---------------- RESULT SANITIZATION ----------------
 def convert_result(result):
+    if result is None:
+        return None
 
-    # numpy number
-    if isinstance(result, (np.integer, np.floating)):
-        return result.item()
+    # NumPy arrays & Pandas Indexes
+    if isinstance(result, (np.ndarray, pd.Index)):
+        return [convert_result(x) for x in result.tolist()]
 
-    # pandas Index
-    if isinstance(result, pd.Index):
-        return result.tolist()
-
-    # pandas Series
+    # Pandas Series
     if isinstance(result, pd.Series):
-        return result.to_dict()
+        clean_s = result.replace({np.nan: None})
+        if isinstance(result.index, pd.RangeIndex):
+            return clean_s.tolist()
+        return {str(k): convert_result(v) for k, v in clean_s.to_dict().items()}
 
-    # pandas DataFrame
+    # Pandas DataFrame (capped at 500 records to prevent memory crashes)
     if isinstance(result, pd.DataFrame):
         if result.empty:
             return []
-        return result.to_dict(orient="records")
+        if len(result) > 500:
+            result = result.head(500)
+        clean_df = result.replace({np.nan: None})
+        return clean_df.to_dict(orient="records")
 
-    # list or tuple
+    # NumPy numeric values
+    if isinstance(result, (np.integer, np.floating)):
+        val = result.item()
+        return None if (isinstance(val, float) and np.isnan(val)) else val
+
+    # Dict
+    if isinstance(result, dict):
+        return {str(k): convert_result(v) for k, v in result.items()}
+
+    # List or tuple
     if isinstance(result, (list, tuple)):
         return [convert_result(r) for r in result]
-
-    # dict
-    if isinstance(result, dict):
-        return {k: convert_result(v) for k, v in result.items()}
 
     return result
 
 
-# ---------------- API ----------------
+# ---------------- API ROUTES ----------------
+@app.get("/")
+def health_check():
+    return {"status": "healthy", "service": "AI Data Analyst API"}
+
 
 @app.post("/upload")
 def upload(file: UploadFile = File(...)):
     global df
-
-    df = pd.read_csv(file.file)
-
-    return {
-        "message": "File uploaded",
-        "columns": list(df.columns)
-    }
+    try:
+        df = pd.read_csv(file.file)
+        return {
+            "message": "File uploaded successfully",
+            "columns": list(df.columns),
+            "rows": len(df)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse CSV: {str(e)}")
 
 
 @app.get("/ai-query")
@@ -125,49 +131,46 @@ def ai_query(q: str):
     global df
 
     if df is None:
-        return {"error": "Upload file first"}
+        return {"error": "Upload a CSV file first"}
 
     try:
         code = get_ai_code(q, list(df.columns))
         code = code.replace("```python", "").replace("```", "").strip()
 
-        result = execute_code(df, code)
+        raw_result = execute_code(df, code)
 
-        # 1. Skip chart generation if it's a massive raw dataframe dump
+        # Generate charts safely
         chart_files = []
-        if isinstance(result, pd.DataFrame) and len(result) > 50:
-            chart_files = []  # Do not choke Matplotlib with full table dumps
-        else:
-            try:
-                chart_files = generate_chart_from_result(result)
-            except Exception:
-                chart_files = []
+        try:
+            chart_files = generate_chart_from_result(raw_result)
+        except Exception as chart_err:
+            print("Chart generation exception:", chart_err)
 
-        # 2. Prevent OOM by capping maximum returned rows
-        if isinstance(result, pd.DataFrame):
-            if len(result) > 500:
-                result = result.head(500)  # Cap preview to 500 rows
-            # 3. Clean NaNs so JSON serialization never throws 500
-            result = result.replace({np.nan: None})
-
-        result = convert_result(result)
+        final_result = convert_result(raw_result)
 
         return {
-            "result": result,
+            "result": final_result,
             "charts": chart_files or []
         }
     except Exception as e:
-        # Return a 200 with error JSON so CORS headers remain intact
-        return {"error": f"Execution failed: {str(e)}"}
-    
+        return {"error": f"Query processing failed: {str(e)}"}
+
+
 @app.get("/chart-image/{name}")
 def chart_image(name: str):
-    path = os.path.join(os.getcwd(), name)
+    safe_name = os.path.basename(name)
+    path = os.path.join(os.getcwd(), safe_name)
 
     if not os.path.exists(path):
         return {"error": "Chart not found"}
 
     return FileResponse(path, media_type="image/png")
+
+
+@app.get("/chart")
+def trigger_manual_chart():
+    return {"message": "Chart endpoint ready"}
+
 
 if __name__ == "__main__":
     import uvicorn

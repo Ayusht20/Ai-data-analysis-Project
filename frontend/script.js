@@ -1,7 +1,6 @@
-const API_BASE = "https://ai-data-analysis-project.onrender.com";
+const API_BASE = "https://ai-data-analysis-project.onrender.com"||"http://localhost:8000";
 const PAGE_SIZE = 10;
 
-// Pagination state tracker
 let tableState = {
     data: [],
     currentPage: 1,
@@ -46,7 +45,7 @@ async function uploadFile() {
         const data = await res.json();
 
         if (!res.ok) {
-            throw new Error(data.error || `Upload failed with status ${res.status}`);
+            throw new Error(data.error || data.detail || `Upload failed with status ${res.status}`);
         }
 
         alert(data.message || "File uploaded successfully");
@@ -97,6 +96,7 @@ async function askQuery() {
         void resultDiv.offsetWidth;
         resultDiv.classList.add("fade-in");
 
+        // Visualization container
         if (data.charts && data.charts.length > 0) {
             container.style.display = "block";
             let chartHtml = "<h4>Visualization</h4>";
@@ -131,19 +131,19 @@ function displayResult(data) {
         return;
     }
 
-    // Single scalar value
+    // Scalar primitive
     if (typeof data !== "object") {
         container.innerHTML = `<p><b>Result:</b> ${escapeHTML(data)}</p>`;
         return;
     }
 
-    // Empty collection
+    // Empty list
     if (Array.isArray(data) && data.length === 0) {
         container.innerHTML = "<p>No data found</p>";
         return;
     }
 
-    // Array of records (Table) or list of strings
+    // Arrays: lists of strings or tables of objects
     if (Array.isArray(data)) {
         tableState.data = data;
         tableState.currentPage = 1;
@@ -152,7 +152,7 @@ function displayResult(data) {
         return;
     }
 
-    // Single Key-Value dictionary
+    // Key-Value dictionary
     const keys = Object.keys(data);
     let table = `<div class="table-wrapper"><table><thead><tr>`;
     keys.forEach(k => { table += `<th>${escapeHTML(k)}</th>`; });
@@ -172,7 +172,7 @@ function renderPaginatedView() {
 
     let contentHtml = "";
 
-    // Case A: Array of primitives (e.g. column names or simple lists)
+    // Array of primitives (e.g. list of skills or column names)
     if (typeof data[0] !== "object") {
         contentHtml += "<ul>";
         currentSlice.forEach(item => {
@@ -180,7 +180,7 @@ function renderPaginatedView() {
         });
         contentHtml += "</ul>";
     } else {
-        // Case B: Tabular dataset (array of objects)
+        // Tabular dataset (array of dicts)
         const headers = Object.keys(data[0]);
 
         contentHtml += `<div class="table-wrapper"><table><thead><tr>`;
@@ -199,7 +199,7 @@ function renderPaginatedView() {
         contentHtml += `</tbody></table></div>`;
     }
 
-    // Case C: Add pagination footer if there is more than 1 page
+    // Pagination navigation bar
     if (totalPages > 1) {
         const startRecord = startIdx + 1;
         const endRecord = Math.min(startIdx + PAGE_SIZE, data.length);
@@ -236,7 +236,7 @@ async function getChart() {
         if (!res.ok) throw new Error("Chart generation failed");
         alert("Chart saved in backend folder");
     } catch (err) {
-        alert(err.message || "Failed to generate chart.");
+        alert(err.message || "Failed to trigger chart.");
     } finally {
         chartBtn.disabled = false;
     }
