@@ -36,9 +36,10 @@ df = None
 # ---------------- CODE EXECUTION ----------------
 def execute_code(data_df, code):
     try:
+        # Strip markdown syntax and extra spaces
         code = code.replace("```python", "").replace("```", "").strip()
 
-        # Fix startswith case-insensitive patterns
+        # Startswith case-insensitive regex fix
         pattern = r"df\['(.*?)'\]\.str\.startswith\('(.*?)'\)"
         match = re.search(pattern, code)
         if match:
@@ -46,25 +47,41 @@ def execute_code(data_df, code):
             value = match.group(2).lower()
             code = f"df[df['{col}'].str.lower().str.strip().str.startswith('{value}')]"
 
-        # Fix deprecated append
+        # Deprecated append fix
         if ".append(" in code:
             code = code.replace(".append(", ", ")
             code = f"pd.concat([{code}])"
 
-        # Block malicious commands
+        # Security check for banned statements
         banned_words = ["import", "__", "os", "sys", "eval", "exec", "open", "subprocess"]
         for word in banned_words:
             if word in code:
                 return "Unsafe code execution blocked"
 
-        # Execute in sandbox context
-        result = eval(code, {"__builtins__": {}}, {"df": data_df, "pd": pd, "np": np})
-        return result
+        # Safe execution namespace
+        local_scope = {
+            "df": data_df,
+            "pd": pd,
+            "np": np
+        }
+
+        # If it's a single one-liner expression without assignments, eval directly
+        if "\n" not in code and "=" not in code:
+            return eval(code, {"__builtins__": {}}, local_scope)
+
+        # If it's multi-line or contains assignments, execute with exec
+        # Ensure code assigns to `result` if not already assigned
+        if "result" not in code:
+            lines = code.strip().split("\n")
+            lines[-1] = f"result = {lines[-1]}"
+            code = "\n".join(lines)
+
+        exec(code, {"__builtins__": {}}, local_scope)
+        return local_scope.get("result", "Query executed successfully with no output.")
 
     except Exception as e:
         return f"Error: {str(e)}"
-
-
+    
 # ---------------- RESULT SANITIZATION ----------------
 def convert_result(result):
     if result is None:
