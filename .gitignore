@@ -1,3 +1,4 @@
 .env
 *.png
 !screenshots/*.png
+__pycache__
