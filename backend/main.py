@@ -2,6 +2,7 @@ import os
 import re
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,28 +24,50 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins="*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Global in-memory dataset
 df = None
 
 
 # ---------------- CODE EXECUTION ----------------
 def execute_code(data_df, code):
     try:
-        # Strip markdown syntax and extra spaces
-        code = code.replace("```python", "").replace("```", "").strip()
+        # Strip markdown syntax and extra whitespace
+        code = re.sub(r"^```(?:python)?\s*", "", code.strip(), flags=re.IGNORECASE)
+        code = re.sub(r"\s*```$", "", code.strip())
 
-        # Startswith case-insensitive regex fix
+        # Strip accidental import statements
+        cleaned_lines = [
+            line for line in code.split("\n")
+            if not line.strip().startswith("import ") and not line.strip().startswith("from ")
+        ]
+        code = "\n".join(cleaned_lines).strip()
+
+        # Block strictly malicious function calls and attributes
+        dangerous_patterns = [
+            r"\b__import__\b", r"\bopen\s*\(", r"\bos\.", r"\bsys\.",
+            r"\bsubprocess\b", r"\beval\s*\(", r"\bexec\s*\(",
+            r"__class__", r"__subclasses__", r"__globals__", r"__builtins__"
+        ]
+        for pattern in dangerous_patterns:
+            if re.search(pattern, code):
+                return "Unsafe code execution blocked"
+
+        # Auto-patch scalar strings passed to .isin() (e.g., .isin('HTML') -> .isin(['HTML']))
+        code = re.sub(r"\.isin\(\s*(['\"][^'\"\[\]]+['\"])\s*\)", r".isin([\1])", code)
+
+        # Auto-patch invalid keep arguments in nlargest / nsmallest / drop_duplicates
+        code = re.sub(r"keep\s*=\s*(?:False|None)", "keep='first'", code)
+
+        # Regex fix for case-insensitive startswith
         pattern = r"df\['(.*?)'\]\.str\.startswith\('(.*?)'\)"
         match = re.search(pattern, code)
         if match:
-            col = match.group(1)
-            value = match.group(2).lower()
+            col, value = match.group(1), match.group(2).lower()
             code = f"df[df['{col}'].str.lower().str.strip().str.startswith('{value}')]"
 
         # Deprecated append fix
@@ -52,104 +75,99 @@ def execute_code(data_df, code):
             code = code.replace(".append(", ", ")
             code = f"pd.concat([{code}])"
 
-        # Security check for banned statements
-        banned_words = ["import", "__", "os", "sys", "eval", "exec", "open", "subprocess"]
-        for word in banned_words:
-            if word in code:
-                return "Unsafe code execution blocked"
-
-        # Whitelist safe built-in functions
         safe_builtins = {
-            "int": int,
-            "float": float,
-            "str": str,
-            "bool": bool,
-            "list": list,
-            "dict": dict,
-            "set": set,
-            "tuple": tuple,
-            "len": len,
-            "min": min,
-            "max": max,
-            "sum": sum,
-            "range": range,
-            "round": round,
-            "sorted": sorted,
-            "abs": abs,
-            "enumerate": enumerate,
-            "zip": zip,
-            "print": print,
+            "int": int, "float": float, "str": str, "bool": bool,
+            "list": list, "dict": dict, "set": set, "tuple": tuple,
+            "len": len, "min": min, "max": max, "sum": sum,
+            "range": range, "round": round, "sorted": sorted, "abs": abs,
+            "enumerate": enumerate, "zip": zip, "print": print
         }
 
-        # Execution scope
         scope = {
             "__builtins__": safe_builtins,
             "df": data_df,
             "pd": pd,
-            "np": np
+            "np": np,
+            "plt": plt
         }
 
-        # If single-expression without assignment, evaluate directly
+        # Single expression evaluation
         if "\n" not in code and "=" not in code:
             return eval(code, scope)
 
-        # Multi-line logic execution
+        # Multi-statement execution
         if "result" not in code:
-            lines = [line for line in code.strip().split("\n") if line.strip()]
+            lines = [l for l in code.strip().split("\n") if l.strip()]
             if lines:
                 lines[-1] = f"result = {lines[-1]}"
                 code = "\n".join(lines)
 
         exec(code, scope)
-        return scope.get("result", "Query executed successfully with no output.")
+        return scope.get("result", "Execution succeeded.")
 
     except Exception as e:
         return f"Error: {str(e)}"
-
-    # ---------------- RESULT SANITIZATION ----------------
+# ---------------- DATA SANITIZATION ----------------
 def convert_result(result):
     if result is None:
         return None
 
-    # NumPy arrays & Pandas Indexes
+    # Handle Pandas Index / NumPy 1D arrays
     if isinstance(result, (np.ndarray, pd.Index)):
         return [convert_result(x) for x in result.tolist()]
 
-    # Pandas Series
+    # Handle Series
     if isinstance(result, pd.Series):
+        if result.empty:
+            return "No matching records found."
         clean_s = result.replace({np.nan: None})
         if isinstance(result.index, pd.RangeIndex):
             return clean_s.tolist()
         return {str(k): convert_result(v) for k, v in clean_s.to_dict().items()}
 
-    # Pandas DataFrame (capped at 500 records to prevent memory crashes)
+    # Handle DataFrame
     if isinstance(result, pd.DataFrame):
         if result.empty:
-            return []
+            return "No matching records found."
+
+        # Flatten MultiIndex columns (from crosstab or pivot_table)
+        if isinstance(result.columns, pd.MultiIndex):
+            result.columns = ['_'.join([str(c) for c in col if str(c)]).strip() for col in result.columns.values]
+
+        # Flatten MultiIndex rows into columns
+        if isinstance(result.index, pd.MultiIndex) or result.index.name is not None:
+            result = result.reset_index()
+
+        # Round floats to 3 decimal places for readability
+        float_cols = result.select_dtypes(include=['float']).columns
+        result[float_cols] = result[float_cols].round(3)
+
+        # Cap output records to avoid client-side freezing
         if len(result) > 500:
             result = result.head(500)
+
         clean_df = result.replace({np.nan: None})
         return clean_df.to_dict(orient="records")
 
-    # NumPy numeric values
+    # Handle NumPy numbers
     if isinstance(result, (np.integer, np.floating)):
         val = result.item()
         return None if (isinstance(val, float) and np.isnan(val)) else val
 
-    # Dict
+    # Handle Dict
     if isinstance(result, dict):
         return {str(k): convert_result(v) for k, v in result.items()}
 
-    # List or tuple
+    # Handle List or Tuple
     if isinstance(result, (list, tuple)):
         return [convert_result(r) for r in result]
 
     return result
 
 
-# ---------------- API ROUTES ----------------
+# ---------------- API ENDPOINTS ----------------
 @app.get("/")
-def health_check():
+def health():
     return {"status": "healthy", "service": "AI Data Analyst API"}
 
 
@@ -158,13 +176,15 @@ def upload(file: UploadFile = File(...)):
     global df
     try:
         df = pd.read_csv(file.file)
+        # Strip trailing/leading spaces from column names
+        df.columns = [str(c).strip() for c in df.columns]
         return {
             "message": "File uploaded successfully",
             "columns": list(df.columns),
             "rows": len(df)
         }
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse CSV: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to read CSV: {str(e)}")
 
 
 @app.get("/ai-query")
@@ -175,23 +195,29 @@ def ai_query(q: str):
         return {"error": "Upload a CSV file first"}
 
     try:
+        chart_path = os.path.join(os.getcwd(), "chart.png")
+        if os.path.exists(chart_path):
+            os.remove(chart_path)
+
         code = get_ai_code(q, list(df.columns))
-        code = code.replace("```python", "").replace("```", "").strip()
-
         raw_result = execute_code(df, code)
-
-        # Generate charts safely
-        chart_files = []
-        try:
-            chart_files = generate_chart_from_result(raw_result)
-        except Exception as chart_err:
-            print("Chart generation exception:", chart_err)
 
         final_result = convert_result(raw_result)
 
+        charts = []
+        # Check if an intentional chart was generated by the executed code
+        if os.path.exists(chart_path) and os.path.getsize(chart_path) > 0:
+            charts = ["chart.png"]
+        else:
+            try:
+                charts = generate_chart_from_result(raw_result, df_columns=list(df.columns)) or []
+            except Exception as chart_err:
+                print("Fallback chart error:", chart_err)
+                charts = []
+
         return {
             "result": final_result,
-            "charts": chart_files or []
+            "charts": charts
         }
     except Exception as e:
         return {"error": f"Query processing failed: {str(e)}"}
@@ -209,8 +235,8 @@ def chart_image(name: str):
 
 
 @app.get("/chart")
-def trigger_manual_chart():
-    return {"message": "Chart endpoint ready"}
+def chart_status():
+    return {"status": "chart ready"}
 
 
 if __name__ == "__main__":
