@@ -1,4 +1,4 @@
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = "https://ai-data-analysis-project.onrender.com";
 const PAGE_SIZE = 10;
 // "https://ai-data-analysis-project.onrender.com"||"http://localhost:8000" || 
 
